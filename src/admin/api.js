@@ -3,6 +3,8 @@ const DB_KEY = "sm_admin_demo_db_v1";
 const seed = {
   admins: [
     { id: 1, full_name: "Super Admin", username: "superadmin", email: "superadmin@smhos.org", role: "super_admin", service_unit_id: null, sub_unit_name: "", is_active: 1, last_login: null, password: "Admin@1234" },
+    { id: 2, full_name: "Media Leader", username: "media.leader", email: "media.leader@smhos.org", role: "service_unit_leader", service_unit_id: 2, sub_unit_name: "", is_active: 1, last_login: null, password: "Leader@1234" },
+    { id: 3, full_name: "Audio Lead", username: "audio.lead", email: "audio.lead@smhos.org", role: "sub_unit_leader", service_unit_id: 2, sub_unit_name: "Audio", is_active: 1, last_login: null, password: "Subunit@1234" },
   ],
   units: [
     { id: 1, name: "Choir", description: "", coordinator: "Favour John", sort_order: 0, is_active: 1 },
@@ -13,8 +15,9 @@ const seed = {
     { id: 2, unit_id: 2, name: "Video", sort_order: 1, is_active: 1 },
   ],
   registrations: [
-    { id: 1, first_name: "Chinwe", surname: "Okafor", other_names: "", sex: "Female", marital_status: "Single", nationality: "Nigerian", address: "Port Harcourt", bus_stop: "Rumuokoro", phone1: "+2348031112222", email: "chinwe@example.com", unit_id: 2, unit_name: "Media & Service", sub_unit: "Audio", status: "pending", notes: "", submitted_at: new Date().toISOString(), photo_path: "" },
-    { id: 2, first_name: "Daniel", surname: "Eze", other_names: "", sex: "Male", marital_status: "Married", nationality: "Nigerian", address: "Abuja", bus_stop: "Wuse", phone1: "+2348033334444", email: "daniel@example.com", unit_id: 1, unit_name: "Choir", sub_unit: "", status: "approved", notes: "", submitted_at: new Date().toISOString(), photo_path: "" },
+    { id: 1, first_name: "Chinwe", surname: "Okafor", other_names: "", sex: "Female", marital_status: "Single", nationality: "Nigerian", address: "Port Harcourt", bus_stop: "Rumuokoro", phone1: "+2348031112222", email: "chinwe@example.com", unit_id: 2, unit_name: "Media & Service", sub_unit: "Audio", status: "new", notes: "", submitted_at: new Date(Date.now() - 1000 * 60 * 60 * 30).toISOString(), photo_path: "" },
+    { id: 2, first_name: "Daniel", surname: "Eze", other_names: "", sex: "Male", marital_status: "Married", nationality: "Nigerian", address: "Abuja", bus_stop: "Wuse", phone1: "+2348033334444", email: "daniel@example.com", unit_id: 1, unit_name: "Choir", sub_unit: "", status: "accepted", notes: "", submitted_at: new Date().toISOString(), photo_path: "" },
+    { id: 3, first_name: "Peace", surname: "Udo", other_names: "", sex: "Female", marital_status: "Single", nationality: "Nigerian", address: "Lagos", bus_stop: "CMS", phone1: "+2348090001111", email: "peace@example.com", unit_id: 2, unit_name: "Media & Service", sub_unit: "Video", status: "in_progress", notes: "", submitted_at: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), photo_path: "" },
   ],
   requests: [
     { id: 1, from_admin_id: 1, from_name: "Super Admin", from_role: "super_admin", message: "Welcome to the platform.", status: "resolved", created_at: new Date().toISOString() },
@@ -33,7 +36,7 @@ const seed = {
     },
   },
   activity: [],
-  nextIds: { admin: 2, unit: 3, sub: 3, reg: 3, act: 1, req: 2 },
+  nextIds: { admin: 4, unit: 3, sub: 3, reg: 4, act: 1, req: 2 },
 };
 
 function readDb() {
@@ -45,6 +48,16 @@ function readDb() {
   }
 }
 function writeDb(db) { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+function normalizeStatus(s) {
+  const map = { pending: "new", approved: "accepted", waitlisted: "in_progress" };
+  return map[s] || s || "new";
+}
+function canAccessRegistration(admin, row) {
+  if (!admin || admin.role === "super_admin") return true;
+  if (admin.role === "service_unit_leader") return Number(row.unit_id) === Number(admin.service_unit_id);
+  if (admin.role === "sub_unit_leader") return Number(row.unit_id) === Number(admin.service_unit_id) && String(row.sub_unit || "").toLowerCase() === String(admin.sub_unit_name || "").toLowerCase();
+  return false;
+}
 function log(db, admin_name, action, entity_type, entity_id, description) {
   db.activity.unshift({
     id: db.nextIds.act++,
@@ -100,6 +113,8 @@ export const api = {
         username: admin.username,
         email: admin.email,
         role: admin.role,
+        service_unit_id: admin.service_unit_id,
+        sub_unit_name: admin.sub_unit_name,
       },
     };
   },
@@ -110,10 +125,10 @@ export const api = {
     const regs = db.registrations;
     const totals = {
       registrations: regs.length,
-      pending: regs.filter((r) => r.status === "pending").length,
-      approved: regs.filter((r) => r.status === "approved").length,
+      pending: regs.filter((r) => normalizeStatus(r.status) === "new").length,
+      approved: regs.filter((r) => normalizeStatus(r.status) === "accepted").length,
       rejected: regs.filter((r) => r.status === "rejected").length,
-      waitlisted: regs.filter((r) => r.status === "waitlisted").length,
+      waitlisted: regs.filter((r) => normalizeStatus(r.status) === "in_progress").length,
       active_units: db.units.filter((u) => u.is_active === 1).length,
       this_week: regs.length,
     };
@@ -136,8 +151,9 @@ export const api = {
 
   async queue(params = {}) {
     const db = readDb();
-    let rows = db.registrations.slice().sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
-    if (params.status) rows = rows.filter((r) => r.status === params.status);
+    let rows = db.registrations.map((r) => ({ ...r, status: normalizeStatus(r.status) })).sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    if (params.viewer) rows = rows.filter((r) => canAccessRegistration(params.viewer, r));
+    if (params.status) rows = rows.filter((r) => normalizeStatus(r.status) === normalizeStatus(params.status));
     if (params.unit_id) rows = rows.filter((r) => Number(r.unit_id) === Number(params.unit_id));
     if (params.sex) rows = rows.filter((r) => (r.sex || "") === params.sex);
     if (params.search) {
@@ -152,9 +168,22 @@ export const api = {
     const db = readDb();
     const row = db.registrations.find((r) => Number(r.id) === Number(id));
     if (!row) throw new Error("Registration not found.");
-    row.status = body.status || row.status;
+    const viewer = body.viewer || null;
+    if (viewer && !canAccessRegistration(viewer, row)) throw new Error("Not allowed for this queue item.");
+    const current = normalizeStatus(row.status);
+    const target = normalizeStatus(body.status || current);
+    const allowedTransitions = {
+      new: ["in_progress", "accepted", "rejected"],
+      in_progress: ["accepted", "rejected", "new"],
+      accepted: ["accepted"],
+      rejected: ["rejected"],
+    };
+    if (viewer?.role !== "super_admin" && !(allowedTransitions[current] || []).includes(target)) {
+      throw new Error("Invalid status transition.");
+    }
+    row.status = target;
     row.notes = body.notes || "";
-    log(db, "Super Admin", "queue.update", "registration", row.id, `Status updated to ${row.status}`);
+    log(db, viewer?.full_name || "Super Admin", "queue.update", "registration", row.id, `Status updated to ${row.status}`);
     writeDb(db);
     return { ok: true };
   },
@@ -290,7 +319,8 @@ export const api = {
 
   async members(params = {}) {
     const db = readDb();
-    let rows = db.registrations.filter((r) => r.status === "approved");
+    let rows = db.registrations.map((r) => ({ ...r, status: normalizeStatus(r.status) })).filter((r) => r.status === "accepted");
+    if (params.viewer) rows = rows.filter((r) => canAccessRegistration(params.viewer, r));
     if (params.unit_id) rows = rows.filter((r) => Number(r.unit_id) === Number(params.unit_id));
     if (params.search) {
       const q = String(params.search).toLowerCase();
@@ -364,5 +394,29 @@ export const api = {
     const result = paginate(rows, params.page, 50);
     const admins = db.admins.map((a) => ({ admin_id: a.id, admin_name: a.full_name }));
     return { ...result, admins };
+  },
+  async subUnitQueuesByUnit(viewer) {
+    const db = readDb();
+    const unitId = Number(viewer?.service_unit_id || 0);
+    const rows = db.registrations.map((r) => ({ ...r, status: normalizeStatus(r.status) })).filter((r) => Number(r.unit_id) === unitId);
+    const grouped = {};
+    rows.forEach((r) => {
+      const key = r.sub_unit || "No sub-unit";
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(r);
+    });
+    return { data: Object.entries(grouped).map(([sub_unit, items]) => ({ sub_unit, items: items.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)) })) };
+  },
+  async overdueAlerts(viewer) {
+    const db = readDb();
+    const threshold = Number(db.settings?.overdue_threshold_hours || 72);
+    const now = Date.now();
+    const alerts = db.registrations
+      .map((r) => ({ ...r, status: normalizeStatus(r.status) }))
+      .filter((r) => canAccessRegistration(viewer, r))
+      .filter((r) => ["new", "in_progress"].includes(r.status))
+      .filter((r) => ((now - new Date(r.submitted_at).getTime()) / (1000 * 60 * 60)) >= threshold)
+      .sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
+    return { data: alerts };
   },
 };

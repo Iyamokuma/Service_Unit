@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { Modal, ConfirmModal } from "../components/Modal.jsx";
 import { useToast } from "../components/Toast.jsx";
+import { useAdminAuth } from "../AdminContext.jsx";
 
-const STATUSES = ["pending", "approved", "rejected", "waitlisted"];
+const STATUSES = ["new", "in_progress", "accepted", "rejected"];
 const MONTHS   = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function fmtDate(str) {
@@ -15,7 +16,13 @@ function fullName(r) { return [r.first_name, r.surname].filter(Boolean).join(" "
 
 export function Queue({ units }) {
   const toast = useToast();
+  const { admin } = useAdminAuth();
+  const isServiceLeader = admin?.role === "service_unit_leader";
+  const isSubUnitLeader = admin?.role === "sub_unit_leader";
+  const canDelete = admin?.role === "super_admin";
   const [rows, setRows]       = useState([]);
+  const [sideBySide, setSideBySide] = useState([]);
+  const [overdue, setOverdue] = useState([]);
   const [pag,  setPag]        = useState({ page: 1, per_page: 25, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
@@ -37,15 +44,29 @@ export function Queue({ units }) {
 
   useEffect(() => {
     clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => load({ ...filters, page: 1 }), 300);
+    debounce.current = setTimeout(() => {
+      const scoped = {
+        ...filters,
+        page: 1,
+        viewer: admin,
+        unit_id: isSubUnitLeader ? admin?.service_unit_id : filters.unit_id,
+      };
+      load(scoped);
+    }, 300);
   }, [filters, load]);
+
+  useEffect(() => {
+    if (!isServiceLeader) return;
+    api.subUnitQueuesByUnit(admin).then((r) => setSideBySide(r.data || [])).catch(() => {});
+    api.overdueAlerts(admin).then((r) => setOverdue(r.data || [])).catch(() => {});
+  }, [isServiceLeader, admin, rows.length]);
 
   const setFilter = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
   const gotoPage  = (p)  => load({ ...filters, page: p });
 
   async function updateStatus(id, status, notes) {
     try {
-      await api.updateStatus(id, { status, notes });
+      await api.updateStatus(id, { status, notes, viewer: admin });
       toast("Status updated.", "success");
       setStatusModal(null);
       load({ ...filters, page: pag.page });
@@ -62,6 +83,13 @@ export function Queue({ units }) {
   }
 
   const unitOpts = units?.data ?? [];
+  const allowedStatus = (current) => {
+    const c = current || "new";
+    if (!["service_unit_leader", "sub_unit_leader"].includes(admin?.role)) return STATUSES;
+    if (c === "new") return ["new", "in_progress", "accepted", "rejected"];
+    if (c === "in_progress") return ["in_progress", "accepted", "rejected", "new"];
+    return [c];
+  };
 
   return (
     <>
@@ -74,13 +102,13 @@ export function Queue({ units }) {
             </span>
             <input placeholder="Search name, email, phone…" value={filters.search} onChange={setFilter("search")} />
           </div>
-          <select className="sa-select" value={filters.unit_id} onChange={setFilter("unit_id")}>
+          <select className="sa-select" value={isServiceLeader || isSubUnitLeader ? admin?.service_unit_id || "" : filters.unit_id} onChange={setFilter("unit_id")} disabled={isServiceLeader || isSubUnitLeader}>
             <option value="">All Units</option>
             {unitOpts.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
           <select className="sa-select" value={filters.status} onChange={setFilter("status")}>
             <option value="">All Statuses</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+            {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
           </select>
           <select className="sa-select" value={filters.sex} onChange={setFilter("sex")}>
             <option value="">All Genders</option>
@@ -149,9 +177,7 @@ export function Queue({ units }) {
                           <button className="sa-btn sa-btn-outline sa-btn-sm" onClick={() => setStatusModal({ id: r.id, status: r.status, notes: r.notes || "" })}>
                             Update
                           </button>
-                          <button className="sa-btn sa-btn-danger sa-btn-sm" onClick={() => setDeleteModal(r.id)}>
-                            Delete
-                          </button>
+                          {canDelete && <button className="sa-btn sa-btn-danger sa-btn-sm" onClick={() => setDeleteModal(r.id)}>Delete</button>}
                         </div>
                       </td>
                     </tr>
@@ -201,12 +227,44 @@ export function Queue({ units }) {
         )}
       </div>
 
+      {isServiceLeader && (
+        <>
+          <div className="sa-card sa-gap-top">
+            <div className="sa-card-head"><span className="sa-card-title">Sub-unit Queues (Side by Side)</span></div>
+            <div className="sa-card-body" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 14 }}>
+              {sideBySide.map((block) => (
+                <div key={block.sub_unit} className="sa-unit-node">
+                  <div className="sa-unit-header"><div className="sa-unit-name">{block.sub_unit}</div></div>
+                  <div className="sa-unit-subs">
+                    {block.items.slice(0, 8).map((i) => <div key={i.id} className="sa-sub-row"><span>{i.first_name} {i.surname}</span><span className={`sa-badge ${i.status}`}>{i.status.replace("_", " ")}</span></div>)}
+                    {block.items.length === 0 && <div className="sa-text-muted sa-text-sm">No queue items.</div>}
+                  </div>
+                </div>
+              ))}
+              {sideBySide.length === 0 && <div className="sa-text-muted">No sub-unit queues found.</div>}
+            </div>
+          </div>
+          <div className="sa-card sa-gap-top">
+            <div className="sa-card-head"><span className="sa-card-title">Overdue Alerts</span></div>
+            <div className="sa-card-body">
+              {overdue.length === 0 ? <div className="sa-text-muted">No overdue alerts right now.</div> : (
+                <table className="sa-table"><thead><tr><th>Ref</th><th>Name</th><th>Sub-unit</th><th>Status</th><th>Submitted</th></tr></thead><tbody>
+                  {overdue.map((o) => <tr key={o.id}><td>{o.id}</td><td>{o.first_name} {o.surname}</td><td>{o.sub_unit || "—"}</td><td><span className={`sa-badge ${o.status}`}>{o.status.replace("_", " ")}</span></td><td>{fmtDate(o.submitted_at)}</td></tr>)}
+                </tbody></table>
+              )}
+              <div className="sa-field-hint" style={{ marginTop: 10 }}>Email notifications are simulated in this demo via this alert panel.</div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Status update modal */}
       <StatusModal
         open={!!statusModal}
         data={statusModal}
         onClose={() => setStatusModal(null)}
         onSave={updateStatus}
+        allowedStatus={allowedStatus}
       />
 
       {/* Delete confirm */}
@@ -222,7 +280,7 @@ export function Queue({ units }) {
   );
 }
 
-function StatusModal({ open, data, onClose, onSave }) {
+function StatusModal({ open, data, onClose, onSave, allowedStatus }) {
   const [status, setStatus] = useState("");
   const [notes,  setNotes]  = useState("");
   const [saving, setSaving] = useState(false);
@@ -247,7 +305,7 @@ function StatusModal({ open, data, onClose, onSave }) {
       <div className="sa-field">
         <label className="sa-label">Status</label>
         <select className="sa-field-select" value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUSES.map((s) => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          {(allowedStatus(data?.status) || []).map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
         </select>
       </div>
       <div className="sa-field">

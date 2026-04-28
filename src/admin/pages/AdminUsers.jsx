@@ -20,7 +20,13 @@ function fmtDate(str) {
 export function AdminUsers({ data, units, reload }) {
   const toast        = useToast();
   const { admin: me } = useAdminAuth();
-  const admins       = data?.data ?? [];
+  const isSuper = me?.role === "super_admin";
+  const isServiceLeader = me?.role === "service_unit_leader";
+  const admins       = (data?.data ?? []).filter((a) => {
+    if (isSuper) return true;
+    if (isServiceLeader) return a.role === "sub_unit_leader" && Number(a.service_unit_id) === Number(me.service_unit_id);
+    return false;
+  });
   const unitList     = units?.data ?? [];
 
   const [modal,  setModal]  = useState(null); // null | {} | admin
@@ -53,7 +59,7 @@ export function AdminUsers({ data, units, reload }) {
           <h2 style={{ fontSize: 16, fontWeight: 700 }}>Admin Accounts</h2>
           <p className="sa-text-muted sa-text-sm">{admins.length} administrator{admins.length !== 1 ? "s" : ""}</p>
         </div>
-        <button className="sa-btn sa-btn-primary" onClick={() => setModal({})}>+ New Admin</button>
+        {(isSuper || isServiceLeader) && <button className="sa-btn sa-btn-primary" onClick={() => setModal({ role: isServiceLeader ? "sub_unit_leader" : "service_unit_leader", service_unit_id: isServiceLeader ? me.service_unit_id : "" })}>+ New Admin</button>}
       </div>
 
       <div className="sa-card">
@@ -106,12 +112,14 @@ export function AdminUsers({ data, units, reload }) {
         </div>
       </div>
 
-      <AdminModal open={!!modal} data={modal} unitList={unitList} onClose={() => setModal(null)} onSave={save} saving={saving} />
+      <AdminModal open={!!modal} data={modal} unitList={unitList} onClose={() => setModal(null)} onSave={save} saving={saving} me={me} />
     </>
   );
 }
 
-function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
+function AdminModal({ open, data, unitList, onClose, onSave, saving, me }) {
+  const isSuper = me?.role === "super_admin";
+  const isServiceLeader = me?.role === "service_unit_leader";
   const isEdit = !!data?.id;
   const [form, setForm] = useState({ full_name: "", username: "", email: "", password: "", role: "service_unit_leader", service_unit_id: "", sub_unit_name: "", is_active: 1 });
 
@@ -123,14 +131,14 @@ function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
       username:  data.username  || "",
       email:     data.email     || "",
       password:  "",
-      role:      data.role      || "service_unit_leader",
-      service_unit_id: data.service_unit_id || "",
+      role:      data.role      || (isServiceLeader ? "sub_unit_leader" : "service_unit_leader"),
+      service_unit_id: data.service_unit_id || (isServiceLeader ? me.service_unit_id : ""),
       sub_unit_name: data.sub_unit_name || "",
       is_active: data.is_active ?? 1,
       id: data.id,
     });
   }
-  if (!open && form._id !== undefined) setForm({ full_name: "", username: "", email: "", password: "", role: "service_unit_leader", service_unit_id: "", sub_unit_name: "", is_active: 1 });
+  if (!open && form._id !== undefined) setForm({ full_name: "", username: "", email: "", password: "", role: isServiceLeader ? "sub_unit_leader" : "service_unit_leader", service_unit_id: isServiceLeader ? me.service_unit_id : "", sub_unit_name: "", is_active: 1 });
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -170,7 +178,7 @@ function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
         <div className="sa-field">
           <label className="sa-label">Role</label>
           <select className="sa-field-select" value={form.role} onChange={set("role")}>
-            {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            {(isSuper ? ROLES : ROLES.filter((r) => r.value === "sub_unit_leader")).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
           <div className="sa-field-hint">{ROLES.find((r) => r.value === form.role)?.desc}</div>
         </div>
@@ -187,9 +195,9 @@ function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
         <div className="sa-form-row">
           <div className="sa-field">
             <label className="sa-label">Service Unit <span className="sa-required">*</span></label>
-            <select className="sa-field-select" value={form.service_unit_id} onChange={(e) => setForm((f) => ({ ...f, service_unit_id: e.target.value, sub_unit_name: "" }))}>
+            <select className="sa-field-select" value={form.service_unit_id} onChange={(e) => setForm((f) => ({ ...f, service_unit_id: e.target.value, sub_unit_name: "" }))} disabled={isServiceLeader}>
               <option value="">Select unit</option>
-              {unitList.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {(isServiceLeader ? unitList.filter((u) => Number(u.id) === Number(me.service_unit_id)) : unitList).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </div>
           {form.role === "sub_unit_leader" && (

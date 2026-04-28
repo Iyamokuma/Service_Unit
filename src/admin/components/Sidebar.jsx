@@ -33,6 +33,7 @@ const NAV_LEADER = [
       { id: "overview", label: "Overview", icon: <GridIcon /> },
       { id: "queue", label: "Application Queue", icon: <ListIcon /> },
       { id: "members", label: "Unit Members", icon: <UsersIcon /> },
+      { id: "admins", label: "Sub-Unit Leaders", icon: <UsersIcon /> },
       { id: "requests", label: "Requests", icon: <RequestIcon /> },
       { id: "activity", label: "Activity Log", icon: <ActivityIcon /> },
     ],

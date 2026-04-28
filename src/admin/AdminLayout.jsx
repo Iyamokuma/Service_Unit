@@ -66,7 +66,7 @@ export function AdminLayout() {
           {page === "queue"     && <Queue     units={units} />}
           {page === "units"     && <ServiceUnits data={units}  reload={loadUnits} />}
           {page === "members"   && <UnitMembers units={units} />}
-          {page === "admins"    && isSuperAdmin && <AdminUsers data={admins} units={units} reload={loadAdmins} />}
+          {page === "admins"    && <AdminUsers data={admins} units={units} reload={loadAdmins} />}
           {page === "requests"  && <Requests />}
           {page === "activity"  && <ActivityLog />}
           {page === "settings"  && isSuperAdmin && <Settings />}
