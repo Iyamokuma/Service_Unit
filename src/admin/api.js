@@ -2,7 +2,7 @@ const DB_KEY = "sm_admin_demo_db_v1";
 
 const seed = {
   admins: [
-    { id: 1, full_name: "Super Admin", username: "superadmin", email: "superadmin@smhos.org", role: "super_admin", unit_access: [], is_active: 1, last_login: null, password: "Admin@1234" },
+    { id: 1, full_name: "Super Admin", username: "superadmin", email: "superadmin@smhos.org", role: "super_admin", service_unit_id: null, sub_unit_name: "", is_active: 1, last_login: null, password: "Admin@1234" },
   ],
   units: [
     { id: 1, name: "Choir", description: "", coordinator: "Favour John", sort_order: 0, is_active: 1 },
@@ -16,8 +16,24 @@ const seed = {
     { id: 1, first_name: "Chinwe", surname: "Okafor", other_names: "", sex: "Female", marital_status: "Single", nationality: "Nigerian", address: "Port Harcourt", bus_stop: "Rumuokoro", phone1: "+2348031112222", email: "chinwe@example.com", unit_id: 2, unit_name: "Media & Service", sub_unit: "Audio", status: "pending", notes: "", submitted_at: new Date().toISOString(), photo_path: "" },
     { id: 2, first_name: "Daniel", surname: "Eze", other_names: "", sex: "Male", marital_status: "Married", nationality: "Nigerian", address: "Abuja", bus_stop: "Wuse", phone1: "+2348033334444", email: "daniel@example.com", unit_id: 1, unit_name: "Choir", sub_unit: "", status: "approved", notes: "", submitted_at: new Date().toISOString(), photo_path: "" },
   ],
+  requests: [
+    { id: 1, from_admin_id: 1, from_name: "Super Admin", from_role: "super_admin", message: "Welcome to the platform.", status: "resolved", created_at: new Date().toISOString() },
+  ],
+  settings: {
+    templates: {
+      approved: "Hello {{name}}, your registration has been approved.",
+      rejected: "Hello {{name}}, your registration was not approved.",
+      waitlisted: "Hello {{name}}, your registration is currently waitlisted.",
+    },
+    overdue_threshold_hours: 72,
+    permissions: {
+      leaders_can_update_queue: true,
+      leaders_can_send_requests: true,
+      sub_unit_leaders_can_update_queue: true,
+    },
+  },
   activity: [],
-  nextIds: { admin: 2, unit: 3, sub: 3, reg: 3, act: 1 },
+  nextIds: { admin: 2, unit: 3, sub: 3, reg: 3, act: 1, req: 2 },
 };
 
 function readDb() {
@@ -206,12 +222,15 @@ export const api = {
     const db = readDb();
     return {
       data: db.admins.map((a) => ({
+        ...(a),
         id: a.id,
         full_name: a.full_name,
         username: a.username,
         email: a.email,
         role: a.role,
-        unit_access: a.unit_access || [],
+        service_unit_name: db.units.find((u) => Number(u.id) === Number(a.service_unit_id))?.name || "",
+        service_unit_id: a.service_unit_id ?? null,
+        sub_unit_name: a.sub_unit_name || "",
         is_active: a.is_active,
         last_login: a.last_login,
       })),
@@ -222,6 +241,8 @@ export const api = {
     if (db.admins.some((a) => a.username.toLowerCase() === String(body.username || "").toLowerCase())) {
       throw new Error("Username already exists.");
     }
+    if (body.role !== "super_admin" && !body.service_unit_id) throw new Error("Service unit is required for leaders.");
+    if (body.role === "sub_unit_leader" && !body.sub_unit_name) throw new Error("Sub-unit is required for sub-unit leaders.");
     const admin = {
       id: db.nextIds.admin++,
       full_name: body.full_name,
@@ -229,7 +250,8 @@ export const api = {
       email: body.email,
       password: body.password || "Admin@1234",
       role: body.role || "viewer",
-      unit_access: body.unit_access || [],
+      service_unit_id: body.service_unit_id ? Number(body.service_unit_id) : null,
+      sub_unit_name: body.sub_unit_name || "",
       is_active: Number(body.is_active ?? 1),
       last_login: null,
     };
@@ -242,10 +264,16 @@ export const api = {
     const db = readDb();
     const admin = db.admins.find((a) => Number(a.id) === Number(id));
     if (!admin) throw new Error("Admin not found.");
+    const nextRole = body.role ?? admin.role;
+    const nextServiceUnitId = body.service_unit_id !== undefined ? (body.service_unit_id ? Number(body.service_unit_id) : null) : admin.service_unit_id;
+    const nextSubUnitName = body.sub_unit_name !== undefined ? body.sub_unit_name : admin.sub_unit_name;
+    if (nextRole !== "super_admin" && !nextServiceUnitId) throw new Error("Service unit is required for leaders.");
+    if (nextRole === "sub_unit_leader" && !nextSubUnitName) throw new Error("Sub-unit is required for sub-unit leaders.");
     admin.full_name = body.full_name ?? admin.full_name;
     admin.email = body.email ?? admin.email;
     admin.role = body.role ?? admin.role;
-    admin.unit_access = body.unit_access ?? admin.unit_access;
+    admin.service_unit_id = body.service_unit_id !== undefined ? (body.service_unit_id ? Number(body.service_unit_id) : null) : admin.service_unit_id;
+    admin.sub_unit_name = body.sub_unit_name !== undefined ? body.sub_unit_name : admin.sub_unit_name;
     admin.is_active = Number(body.is_active ?? admin.is_active);
     if (body.password) admin.password = body.password;
     log(db, "Super Admin", "admin.update", "admin", admin.id, `Updated admin ${admin.username}`);
@@ -258,6 +286,67 @@ export const api = {
     log(db, "Super Admin", "admin.delete", "admin", id, "Deleted admin");
     writeDb(db);
     return { ok: true };
+  },
+
+  async members(params = {}) {
+    const db = readDb();
+    let rows = db.registrations.filter((r) => r.status === "approved");
+    if (params.unit_id) rows = rows.filter((r) => Number(r.unit_id) === Number(params.unit_id));
+    if (params.search) {
+      const q = String(params.search).toLowerCase();
+      rows = rows.filter((r) => `${r.first_name} ${r.surname} ${r.email} ${r.phone1}`.toLowerCase().includes(q));
+    }
+    rows.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    return paginate(rows, params.page, params.per_page || 25);
+  },
+
+  async requests(params = {}) {
+    const db = readDb();
+    let rows = db.requests.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (params.status) rows = rows.filter((r) => r.status === params.status);
+    if (params.from_admin_id) rows = rows.filter((r) => Number(r.from_admin_id) === Number(params.from_admin_id));
+    return paginate(rows, params.page, params.per_page || 25);
+  },
+  async createRequest(body) {
+    const db = readDb();
+    const req = {
+      id: db.nextIds.req++,
+      from_admin_id: Number(body.from_admin_id),
+      from_name: body.from_name,
+      from_role: body.from_role,
+      message: body.message,
+      status: "open",
+      created_at: new Date().toISOString(),
+    };
+    db.requests.unshift(req);
+    log(db, body.from_name || "Admin", "request.create", "request", req.id, "Created support request");
+    writeDb(db);
+    return { data: req };
+  },
+  async updateRequest(id, body) {
+    const db = readDb();
+    const req = db.requests.find((r) => Number(r.id) === Number(id));
+    if (!req) throw new Error("Request not found.");
+    req.status = body.status || req.status;
+    log(db, "Super Admin", "request.update", "request", req.id, `Request marked ${req.status}`);
+    writeDb(db);
+    return { data: req };
+  },
+
+  async settings() {
+    return { data: readDb().settings };
+  },
+  async updateSettings(body) {
+    const db = readDb();
+    db.settings = {
+      ...db.settings,
+      ...body,
+      templates: { ...(db.settings?.templates || {}), ...(body.templates || {}) },
+      permissions: { ...(db.settings?.permissions || {}), ...(body.permissions || {}) },
+    };
+    log(db, "Super Admin", "settings.update", "settings", 1, "Updated platform settings");
+    writeDb(db);
+    return { data: db.settings };
   },
 
   async activity(params = {}) {

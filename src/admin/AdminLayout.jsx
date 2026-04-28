@@ -5,19 +5,28 @@ import { Queue } from "./pages/Queue.jsx";
 import { ServiceUnits } from "./pages/ServiceUnits.jsx";
 import { AdminUsers } from "./pages/AdminUsers.jsx";
 import { ActivityLog } from "./pages/ActivityLog.jsx";
+import { UnitMembers } from "./pages/UnitMembers.jsx";
+import { Requests } from "./pages/Requests.jsx";
+import { Settings } from "./pages/Settings.jsx";
 import { api } from "./api.js";
 import { useToast } from "./components/Toast.jsx";
+import { useAdminAuth } from "./AdminContext.jsx";
 
 const PAGE_TITLES = {
   overview: "Dashboard Overview",
   queue:    "Application Queue",
   units:    "Service Units",
+  members:  "Unit Members",
   admins:   "Admin Accounts",
+  requests: "Requests",
   activity: "Activity Log",
+  settings: "Settings",
 };
 
 export function AdminLayout() {
   const toast  = useToast();
+  const { admin } = useAdminAuth();
+  const isSuperAdmin = admin?.role === "super_admin";
   const [page, setPage]   = useState("overview");
   const [units, setUnits] = useState(null);
   const [admins, setAdmins] = useState(null);
@@ -56,8 +65,11 @@ export function AdminLayout() {
           {page === "overview"  && <Overview />}
           {page === "queue"     && <Queue     units={units} />}
           {page === "units"     && <ServiceUnits data={units}  reload={loadUnits} />}
-          {page === "admins"    && <AdminUsers   data={admins} units={units} reload={loadAdmins} />}
+          {page === "members"   && <UnitMembers units={units} />}
+          {page === "admins"    && isSuperAdmin && <AdminUsers data={admins} units={units} reload={loadAdmins} />}
+          {page === "requests"  && <Requests />}
           {page === "activity"  && <ActivityLog />}
+          {page === "settings"  && isSuperAdmin && <Settings />}
         </div>
       </div>
     </div>

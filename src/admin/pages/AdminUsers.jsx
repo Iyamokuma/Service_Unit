@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { api } from "../api.js";
-import { Modal, ConfirmModal } from "../components/Modal.jsx";
+import { Modal } from "../components/Modal.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useAdminAuth } from "../AdminContext.jsx";
 
 const ROLES = [
-  { value: "super_admin", label: "Super Admin",  desc: "Full access to everything." },
-  { value: "unit_admin",  label: "Unit Admin",   desc: "Can view and process their assigned units." },
-  { value: "viewer",      label: "Viewer",        desc: "Read-only access to queue." },
+  { value: "super_admin", label: "Super Admin", desc: "Full global access." },
+  { value: "service_unit_leader", label: "Service Unit Leader", desc: "Can manage assigned service unit." },
+  { value: "sub_unit_leader", label: "Sub-unit Leader", desc: "Can manage assigned sub-unit only." },
 ];
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -24,7 +24,6 @@ export function AdminUsers({ data, units, reload }) {
   const unitList     = units?.data ?? [];
 
   const [modal,  setModal]  = useState(null); // null | {} | admin
-  const [delId,  setDelId]  = useState(null);
   const [saving, setSaving] = useState(false);
 
   async function save(form) {
@@ -39,11 +38,10 @@ export function AdminUsers({ data, units, reload }) {
     finally { setSaving(false); }
   }
 
-  async function del() {
+  async function toggleActive(admin) {
     try {
-      await api.deleteAdmin(delId);
-      toast("Admin deleted.", "success");
-      setDelId(null);
+      await api.updateAdmin(admin.id, { is_active: admin.is_active ? 0 : 1 });
+      toast(admin.is_active ? "Admin deactivated." : "Admin activated.", "success");
       reload();
     } catch (e) { toast(e.message, "error"); }
   }
@@ -70,7 +68,7 @@ export function AdminUsers({ data, units, reload }) {
                   <th>Username</th>
                   <th>Email</th>
                   <th>Role</th>
-                  <th>Unit Access</th>
+                  <th>Scope</th>
                   <th>Status</th>
                   <th>Last Login</th>
                   <th>Actions</th>
@@ -91,17 +89,13 @@ export function AdminUsers({ data, units, reload }) {
                     <td className="sa-text-muted">{a.username}</td>
                     <td>{a.email}</td>
                     <td><span className={`sa-badge ${a.role}`}>{a.role.replace("_", " ")}</span></td>
-                    <td className="sa-text-muted sa-text-sm">
-                      {a.role === "super_admin" ? "All units" : a.unit_access?.length ? `${a.unit_access.length} unit(s)` : "All units"}
-                    </td>
+                    <td className="sa-text-muted sa-text-sm">{a.role === "super_admin" ? "Global" : `${a.service_unit_name || "—"}${a.sub_unit_name ? ` / ${a.sub_unit_name}` : ""}`}</td>
                     <td><span className={`sa-badge ${a.is_active ? "active" : "inactive"}`}>{a.is_active ? "Active" : "Inactive"}</span></td>
                     <td className="sa-text-muted">{fmtDate(a.last_login)}</td>
                     <td>
                       <div className="sa-table-actions">
                         <button className="sa-btn sa-btn-outline sa-btn-sm" onClick={() => setModal(a)}>Edit</button>
-                        {a.id !== +me.id && (
-                          <button className="sa-btn sa-btn-danger sa-btn-sm" onClick={() => setDelId(a.id)}>Delete</button>
-                        )}
+                        {a.id !== +me.id && <button className="sa-btn sa-btn-danger sa-btn-sm" onClick={() => toggleActive(a)}>{a.is_active ? "Deactivate" : "Activate"}</button>}
                       </div>
                     </td>
                   </tr>
@@ -113,22 +107,13 @@ export function AdminUsers({ data, units, reload }) {
       </div>
 
       <AdminModal open={!!modal} data={modal} unitList={unitList} onClose={() => setModal(null)} onSave={save} saving={saving} />
-
-      <ConfirmModal
-        open={!!delId}
-        onClose={() => setDelId(null)}
-        onConfirm={del}
-        title="Delete Admin"
-        message="Are you sure you want to delete this admin account? They will lose access immediately."
-        danger
-      />
     </>
   );
 }
 
 function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
   const isEdit = !!data?.id;
-  const [form, setForm] = useState({ full_name: "", username: "", email: "", password: "", role: "viewer", unit_access: [], is_active: 1 });
+  const [form, setForm] = useState({ full_name: "", username: "", email: "", password: "", role: "service_unit_leader", service_unit_id: "", sub_unit_name: "", is_active: 1 });
 
   // Sync form when data changes
   if (open && data && form._id !== data.id) {
@@ -138,22 +123,18 @@ function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
       username:  data.username  || "",
       email:     data.email     || "",
       password:  "",
-      role:      data.role      || "viewer",
-      unit_access: data.unit_access || [],
+      role:      data.role      || "service_unit_leader",
+      service_unit_id: data.service_unit_id || "",
+      sub_unit_name: data.sub_unit_name || "",
       is_active: data.is_active ?? 1,
       id: data.id,
     });
   }
-  if (!open && form._id !== undefined) setForm({ full_name: "", username: "", email: "", password: "", role: "viewer", unit_access: [], is_active: 1 });
+  if (!open && form._id !== undefined) setForm({ full_name: "", username: "", email: "", password: "", role: "service_unit_leader", service_unit_id: "", sub_unit_name: "", is_active: 1 });
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  function toggleUnit(uid) {
-    setForm((f) => {
-      const ua = f.unit_access || [];
-      return { ...f, unit_access: ua.includes(uid) ? ua.filter((x) => x !== uid) : [...ua, uid] };
-    });
-  }
+  const selectedUnit = unitList.find((u) => Number(u.id) === Number(form.service_unit_id));
 
   return (
     <Modal
@@ -202,21 +183,24 @@ function AdminModal({ open, data, unitList, onClose, onSave, saving }) {
         </div>
       </div>
 
-      {form.role === "unit_admin" && (
-        <div className="sa-field">
-          <label className="sa-label">Unit Access <span className="sa-field-hint">(leave empty for all units)</span></label>
-          <div className="sa-checkbox-group">
-            {unitList.map((u) => (
-              <div
-                key={u.id}
-                className={`sa-checkbox-item${form.unit_access?.includes(u.id) ? " checked" : ""}`}
-                onClick={() => toggleUnit(u.id)}
-              >
-                {form.unit_access?.includes(u.id) && "✓ "}
-                {u.name}
-              </div>
-            ))}
+      {form.role !== "super_admin" && (
+        <div className="sa-form-row">
+          <div className="sa-field">
+            <label className="sa-label">Service Unit <span className="sa-required">*</span></label>
+            <select className="sa-field-select" value={form.service_unit_id} onChange={(e) => setForm((f) => ({ ...f, service_unit_id: e.target.value, sub_unit_name: "" }))}>
+              <option value="">Select unit</option>
+              {unitList.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
           </div>
+          {form.role === "sub_unit_leader" && (
+            <div className="sa-field">
+              <label className="sa-label">Sub-unit <span className="sa-required">*</span></label>
+              <select className="sa-field-select" value={form.sub_unit_name} onChange={(e) => setForm((f) => ({ ...f, sub_unit_name: e.target.value }))}>
+                <option value="">Select sub-unit</option>
+                {(selectedUnit?.sub_units || []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       )}
     </Modal>
