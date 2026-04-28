@@ -1,4 +1,8 @@
-const BASE = "http://localhost:8080/admin";
+const RAW_BASE =
+  import.meta.env.VITE_ADMIN_API_BASE ||
+  `${window.location.origin}/backend/admin`;
+
+const BASE = RAW_BASE.replace(/\/+$/, "");
 
 function token() {
   return localStorage.getItem("admin_token") || "";
