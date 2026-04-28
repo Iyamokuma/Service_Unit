@@ -16,7 +16,7 @@ export function AdminLogin() {
     <div className="sa-login-page">
       <form className="sa-login-card" onSubmit={onSubmit}>
         <div className="sa-login-logo">
-          <div className="sa-login-mark">S</div>
+          <img className="sa-login-mark-logo" src="/smh.png" alt="Salvation Ministries logo" />
           <div>
             <div className="sa-login-title">Salvation Ministries</div>
             <div className="sa-login-sub">Super Admin Portal</div>
