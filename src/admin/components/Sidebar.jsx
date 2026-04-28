@@ -30,7 +30,7 @@ export function Sidebar({ page, setPage, pendingCount }) {
   return (
     <aside className="sa-sidebar">
       <div className="sa-sidebar-brand">
-        <div className="sa-brand-mark">S</div>
+        <img className="sa-brand-logo" src="/smh.png" alt="Salvation Ministries logo" />
         <div>
           <div className="sa-brand-name">Salvation Ministries</div>
           <div className="sa-brand-sub">Super Admin</div>
