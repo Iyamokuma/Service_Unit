@@ -125,7 +125,7 @@ export function Queue({ units }) {
                       <td className="sa-text-muted">{r.id}</td>
                       <td>
                         {r.photo_path
-                          ? <img src={`http://localhost:8080/${r.photo_path}`} className="sa-photo" alt="" />
+                          ? <img src={r.photo_path} className="sa-photo" alt="" />
                           : <div className="sa-photo-placeholder">{(r.first_name?.[0] || "?").toUpperCase()}</div>
                         }
                       </td>
