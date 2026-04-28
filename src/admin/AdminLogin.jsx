@@ -55,10 +55,6 @@ export function AdminLogin() {
           {loading ? "Signing in…" : "Sign in"}
         </button>
 
-        <p className="sa-login-badge">
-          Default: <strong>superadmin</strong> / <strong>Admin@1234</strong>
-          <br />Change your password after first login.
-        </p>
       </form>
     </div>
   );
